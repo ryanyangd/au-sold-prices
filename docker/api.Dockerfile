@@ -1,11 +1,11 @@
 # Build from the repository root: docker build -f docker/api.Dockerfile -t ausold-api .
-FROM python:3.12-slim AS build
+FROM python:3.14-slim AS build
 WORKDIR /src
 COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
 RUN pip install --no-cache-dir --prefix=/install ".[api]"
 
-FROM python:3.12-slim
+FROM python:3.14-slim
 RUN useradd --system --uid 10001 app
 COPY --from=build /install /usr/local
 USER app
