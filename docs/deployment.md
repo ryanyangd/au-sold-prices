@@ -215,6 +215,22 @@ automatically, then waits for your approval to deploy `prod`. Test on the dev UR
 - **Rotate the Postgres password:** `gh secret set PG_ADMIN_PASSWORD --env <env>` then redeploy.
 - **Logs:** GitHub Actions run logs for deployments; `az containerapp logs show -g <rg> -n <app>`.
 
+### Search hangs on "Searching..." (database stopped)
+
+Symptom: the address search spinner never ends and `/health/ready` is slow or 503. Cause seen on
+the MCAPS subscription: a Microsoft-managed automation stops the dev Postgres server overnight
+(Activity log: *Stops an existing server*, caller not in your tenant). Check and fix:
+
+```sh
+az postgres flexible-server list -g rg-ausold-dev-aue --query "[].{n:name,state:state}" -o table
+sh scripts/ci/ensure-postgres.sh dev          # starts it and waits until Ready
+```
+
+This is automated: the **Keep databases running** workflow checks every two hours and restarts a
+stopped server, the data refresh does the same before it runs, and the load task retries. The API
+now fails fast with HTTP 503 (instead of hanging) while the database is down, and the web app
+times out requests after 15 seconds and shows an error.
+
 ### Known limits of this first version
 
 - Postgres accepts connections from Azure services (TLS only), and the API uses the admin login.

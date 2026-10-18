@@ -46,3 +46,24 @@ describe("api client", () => {
     await expect(getProperty("x")).rejects.toMatchObject({ status: 0 });
   });
 });
+
+describe("api client timeouts", () => {
+  it("passes an abort signal so a hung API cannot hang the page", async () => {
+    fetchMock.mockReturnValue(json({ results: [] }));
+    await searchAddresses("12 exam");
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("still rethrows caller aborts as AbortError", async () => {
+    const ctrl = new AbortController();
+    fetchMock.mockImplementation((_url: string, init: RequestInit) => {
+      return new Promise((_resolve, reject) => {
+        init.signal!.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+      });
+    });
+    const pending = searchAddresses("12 exam", { signal: ctrl.signal });
+    ctrl.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  });
+});

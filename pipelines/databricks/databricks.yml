@@ -51,6 +51,10 @@ resources:
         - task_key: load_serving
           depends_on:
             - task_key: silver_gold
+          # The database may still be starting after an overnight stop.
+          max_retries: 2
+          min_retry_interval_millis: 600000
+          retry_on_timeout: false
           notebook_task:
             notebook_path: ./load_serving.py
             base_parameters:

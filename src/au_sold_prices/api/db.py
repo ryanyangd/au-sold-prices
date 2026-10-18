@@ -79,9 +79,17 @@ class Repository:
         self._pool = pool
 
     @classmethod
-    def connect(cls, database_url: str) -> "Repository":
+    def connect(cls, database_url: str, timeout: float = 5) -> "Repository":
+        # Fail fast (5 s) when the database is down, and drop dead connections after a restart.
         pool = ConnectionPool(
-            database_url, min_size=1, max_size=10, kwargs={"row_factory": dict_row}, open=True
+            database_url,
+            min_size=1,
+            max_size=10,
+            timeout=timeout,
+            max_lifetime=1800,
+            check=ConnectionPool.check_connection,
+            kwargs={"row_factory": dict_row},
+            open=True,
         )
         return cls(pool)
 
