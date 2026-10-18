@@ -1,0 +1,88 @@
+name: Data refresh
+
+# Runs the cloud data pipeline for one environment: ingest the source file into the lake, then
+# run the Databricks job (bronze -> silver -> gold -> Postgres). Also runnable by hand, e.g. after
+# uploading a CSV with scripts/upload-csv.sh.
+on:
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+      run_ingest:
+        type: boolean
+        default: true
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment
+        type: choice
+        options: [dev, prod]
+        default: dev
+      run_ingest:
+        description: Trigger the ingest function first (untick to use a CSV you uploaded)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  refresh:
+    name: Refresh data (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    env:
+      ENVIRONMENT: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Ingest the source file
+        if: inputs.run_ingest
+        run: sh scripts/ci/ingest-and-wait.sh
+
+      - name: Check a completed file exists in the lake
+        if: ${{ !inputs.run_ingest }}
+        run: |
+          OUT="$(az deployment sub show -n "ausold-${ENVIRONMENT}" --query properties.outputs -o json)"
+          LAKE="$(echo "$OUT" | jq -r .lakeStorageName.value)"
+          COUNT="$(az storage blob list --auth-mode login --account-name "$LAKE" -c raw --prefix nsw_psi/ \
+            --query "length([?ends_with(name, 'data.csv')])" -o tsv)"
+          [ "${COUNT:-0}" -gt 0 ] || { echo "No data.csv in raw/nsw_psi. Upload one with scripts/upload-csv.sh." >&2; exit 1; }
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: databricks/setup-cli@main
+      - run: pip install databricks-sdk
+
+      - name: Run the Databricks pipeline
+        run: sh scripts/ci/databricks-run.sh
+
+      - name: Verify the API serves the new data
+        run: |
+          OUT="$(az deployment sub show -n "ausold-${ENVIRONMENT}" --query properties.outputs -o json)"
+          API="$(echo "$OUT" | jq -r .apiUrl.value)"
+          curl -fsS "$API/search/addresses?q=george%20st" | tee /tmp/search.json
+          grep -q '"property_id"' /tmp/search.json || { echo "Search returned no properties" >&2; exit 1; }
+
+  report-failure:
+    needs: refresh
+    if: failure() && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open a bug issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "Data refresh failed (${{ inputs.environment }})" \
+            --label bug --label data-pipeline \
+            --body "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

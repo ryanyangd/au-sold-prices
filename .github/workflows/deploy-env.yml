@@ -1,0 +1,152 @@
+name: Deploy environment
+
+# Reusable: plan -> approval -> infra + app release -> smoke test -> data refresh for one
+# environment (dev or prod). Configuration comes from the GitHub environment of the same name.
+on:
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  plan:
+    name: Plan (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    env:
+      AUSOLD_ENVIRONMENT: ${{ inputs.environment }}
+      AUSOLD_ALERT_EMAIL: ${{ vars.ALERT_EMAIL }}
+      AUSOLD_PG_PASSWORD: ${{ secrets.PG_ADMIN_PASSWORD }}
+      AUSOLD_ADMIN_OBJECT_ID: ${{ vars.ADMIN_OBJECT_ID }}
+      AUSOLD_DEPLOYER_OBJECT_ID: ${{ vars.DEPLOYER_OBJECT_ID }}
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+      STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+      STRIPE_PRICE_MONTHLY: ${{ vars.STRIPE_PRICE_MONTHLY }}
+      STRIPE_PRICE_ANNUAL: ${{ vars.STRIPE_PRICE_ANNUAL }}
+      ENTRA_TENANT_ID: ${{ vars.ENTRA_TENANT_ID }}
+      ENTRA_TENANT_SUBDOMAIN: ${{ vars.ENTRA_TENANT_SUBDOMAIN }}
+      ENTRA_API_AUDIENCE: ${{ vars.ENTRA_API_AUDIENCE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: What will change
+        run: |
+          {
+            echo "### Infrastructure plan for ${{ inputs.environment }}"
+            echo '```'
+            sh scripts/ci/bicep-deploy.sh what-if
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  approve:
+    name: Approve (${{ inputs.environment }})
+    needs: plan
+    runs-on: ubuntu-latest
+    # `prod-approval` has required reviewers; `dev-approval` has none.
+    environment: ${{ inputs.environment }}-approval
+    steps:
+      - run: echo "Approved to deploy ${{ inputs.environment }}"
+
+  deploy:
+    name: Deploy (${{ inputs.environment }})
+    needs: approve
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    env:
+      AUSOLD_ENVIRONMENT: ${{ inputs.environment }}
+      AUSOLD_ALERT_EMAIL: ${{ vars.ALERT_EMAIL }}
+      AUSOLD_PG_PASSWORD: ${{ secrets.PG_ADMIN_PASSWORD }}
+      AUSOLD_ADMIN_OBJECT_ID: ${{ vars.ADMIN_OBJECT_ID }}
+      AUSOLD_DEPLOYER_OBJECT_ID: ${{ vars.DEPLOYER_OBJECT_ID }}
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+      STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+      STRIPE_PRICE_MONTHLY: ${{ vars.STRIPE_PRICE_MONTHLY }}
+      STRIPE_PRICE_ANNUAL: ${{ vars.STRIPE_PRICE_ANNUAL }}
+      ENTRA_TENANT_ID: ${{ vars.ENTRA_TENANT_ID }}
+      ENTRA_TENANT_SUBDOMAIN: ${{ vars.ENTRA_TENANT_SUBDOMAIN }}
+      ENTRA_API_AUDIENCE: ${{ vars.ENTRA_API_AUDIENCE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Register resource providers
+        run: |
+          for ns in Microsoft.Databricks Microsoft.Web Microsoft.Storage Microsoft.Insights \
+            Microsoft.OperationalInsights Microsoft.Consumption Microsoft.KeyVault \
+            Microsoft.DBforPostgreSQL Microsoft.ContainerRegistry Microsoft.App \
+            Microsoft.ManagedIdentity Microsoft.Authorization; do
+            az provider register --namespace "$ns" --wait
+          done
+
+      - name: Deploy infrastructure
+        run: sh scripts/ci/bicep-deploy.sh create
+
+      - name: Read outputs
+        id: out
+        run: |
+          for key in resourceGroupName registryName apiName webName apiUrl webUrl ingestFunctionName; do
+            echo "$key=$(jq -r ".$key.value" deployment-outputs.json)" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Build images in Azure Container Registry
+        env:
+          REGISTRY: ${{ steps.out.outputs.registryName }}
+          TAG: ${{ github.sha }}
+        run: |
+          az acr build -r "$REGISTRY" -t "ausold-api:$TAG" -f docker/api.Dockerfile .
+          az acr build -r "$REGISTRY" -t "ausold-web:$TAG" \
+            --build-arg NEXT_PUBLIC_USE_MOCK=false \
+            --build-arg NEXT_PUBLIC_API_BASE_URL="${{ steps.out.outputs.apiUrl }}" \
+            --build-arg NEXT_PUBLIC_ENTRA_CLIENT_ID="${{ vars.NEXT_PUBLIC_ENTRA_CLIENT_ID }}" \
+            --build-arg NEXT_PUBLIC_ENTRA_AUTHORITY="${{ vars.NEXT_PUBLIC_ENTRA_AUTHORITY }}" \
+            --build-arg NEXT_PUBLIC_ENTRA_API_SCOPE="${{ vars.NEXT_PUBLIC_ENTRA_API_SCOPE }}" \
+            apps/web
+
+      - name: Release the new images
+        env:
+          AUSOLD_API_IMAGE: ${{ steps.out.outputs.registryName }}.azurecr.io/ausold-api:${{ github.sha }}
+          AUSOLD_WEB_IMAGE: ${{ steps.out.outputs.registryName }}.azurecr.io/ausold-web:${{ github.sha }}
+        run: sh scripts/ci/bicep-deploy.sh create
+
+      - name: Publish the ingest function
+        uses: Azure/functions-action@v1
+        with:
+          app-name: ${{ steps.out.outputs.ingestFunctionName }}
+          package: functions/ingest
+          sku: flexconsumption
+          remote-build: true
+
+      - name: Smoke test
+        run: sh scripts/ci/smoke.sh "${{ steps.out.outputs.apiUrl }}" "${{ steps.out.outputs.webUrl }}"
+
+      - name: Summary
+        run: |
+          {
+            echo "### ${{ inputs.environment }} is deployed"
+            echo "- Web: ${{ steps.out.outputs.webUrl }}"
+            echo "- API: ${{ steps.out.outputs.apiUrl }}"
+            echo "- Stripe webhook URL: ${{ steps.out.outputs.apiUrl }}/webhooks/stripe"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  data:
+    name: Data refresh (${{ inputs.environment }})
+    needs: deploy
+    uses: ./.github/workflows/data-refresh.yml
+    with:
+      environment: ${{ inputs.environment }}
+      run_ingest: true
+    secrets: inherit

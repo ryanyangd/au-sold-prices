@@ -1,0 +1,69 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --surface-2: #f1f5f9;
+  --line: #e2e8f0;
+  --fg: #0f172a;
+  --muted: #475569;
+  --brand: #4338ca;
+  --brand-hover: #3730a3;
+  --brand-soft: #eef2ff;
+  --btn: #4338ca;
+  --btn-hover: #3730a3;
+  --chart-grid: #e2e8f0;
+  color-scheme: light;
+}
+
+.dark {
+  --bg: #0b1120;
+  --surface: #111a2e;
+  --surface-2: #17223b;
+  --line: #243049;
+  --fg: #f1f5f9;
+  --muted: #a3b1c6;
+  --brand: #818cf8;
+  --brand-hover: #a5b4fc;
+  --brand-soft: #1e2750;
+  --btn: #4f46e5;
+  --btn-hover: #4338ca;
+  --chart-grid: #243049;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-soft: var(--brand-soft);
+  --color-btn: var(--btn);
+  --color-btn-hover: var(--btn-hover);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
