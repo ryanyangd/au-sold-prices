@@ -133,7 +133,9 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
           ]
           probes: apiPlaceholder ? [] : [
             { type: 'Liveness', httpGet: { path: '/health', port: 8000 } }
-            { type: 'Readiness', httpGet: { path: '/health/ready', port: 8000 } }
+            // Not /health/ready: a database outage must not remove the API from rotation, or every
+            // request would hang instead of failing fast with 503.
+            { type: 'Readiness', httpGet: { path: '/health', port: 8000 } }
           ]
         }
       ]
