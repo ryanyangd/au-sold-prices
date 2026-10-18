@@ -4,6 +4,9 @@ from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from psycopg import OperationalError
+from psycopg_pool import PoolTimeout
 from pydantic import BaseModel
 
 from au_sold_prices.api.auth import AuthError, Principal, TokenVerifier
@@ -81,8 +84,15 @@ def create_app(
             return "free"
         return repo.upsert_user(principal.subject, principal.email, principal.name).plan
 
+    @app.exception_handler(PoolTimeout)
+    @app.exception_handler(OperationalError)
+    async def database_unavailable(request: Request, exc: Exception) -> JSONResponse:
+        log.error("database unavailable: %s", exc)
+        return JSONResponse({"detail": "Service temporarily unavailable"}, status_code=503)
+
+    # async so liveness never queues behind blocked database calls in the thread pool
     @app.get("/health")
-    def health() -> dict[str, str]:
+    async def health() -> dict[str, str]:
         return {"status": "ok"}
 
     @app.get("/health/ready")

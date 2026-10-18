@@ -19,6 +19,9 @@ export class ApiError extends Error {
   }
 }
 
+/** Fail instead of hanging when the API or its database is unavailable. */
+const REQUEST_TIMEOUT_MS = 15_000;
+
 interface RequestOptions {
   method?: "GET" | "POST";
   token?: string | null;
@@ -31,13 +34,16 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
 
+  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  const signal = opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout;
+
   let res: Response;
   try {
     res = await fetch(`${API_BASE_URL}${path}`, {
       method: opts.method ?? "GET",
       headers,
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-      signal: opts.signal,
+      signal,
       cache: "no-store",
     });
   } catch (err) {

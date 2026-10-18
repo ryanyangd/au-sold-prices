@@ -40,6 +40,9 @@ jobs:
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       - uses: databricks/setup-cli@main
 
+      - name: Make sure Postgres is running
+        run: sh scripts/ci/ensure-postgres.sh "$ENVIRONMENT"
+
       - name: Run the Databricks pipeline
         run: sh scripts/ci/databricks-run.sh
 
