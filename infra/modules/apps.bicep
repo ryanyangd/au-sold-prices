@@ -3,7 +3,14 @@ param tags object
 param workload string
 param environment string
 param suffix string
-param keyVaultName string
+@secure()
+param databaseUrl string
+
+@secure()
+param stripeSecretKey string = ''
+
+@secure()
+param stripeWebhookSecret string = ''
 param logAnalyticsId string
 
 @description('Initial images. Replace via `az containerapp update` once the real images are pushed.')
@@ -27,10 +34,6 @@ resource logs 'Microsoft.OperationalInsights/workspaces@2023-09-01' existing = {
   name: last(split(logAnalyticsId, '/'))
 }
 
-resource vault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
-  name: keyVaultName
-}
-
 resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   name: 'cr${workload}${environment}${suffix}'
   location: location
@@ -46,7 +49,6 @@ resource identity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' 
 }
 
 var acrPull = '7f951dda-4ed3-4680-a7ca-43fe172d538d'
-var keyVaultSecretsUser = '4633458b-17de-4789-a0b3-9c8e8bf1a5a3'
 
 resource pullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(registry.id, identity.id, acrPull)
@@ -55,16 +57,6 @@ resource pullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
     principalId: identity.properties.principalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', acrPull)
-  }
-}
-
-resource secretsRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(vault.id, identity.id, keyVaultSecretsUser)
-  scope: vault
-  properties: {
-    principalId: identity.properties.principalId
-    principalType: 'ServicePrincipal'
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', keyVaultSecretsUser)
   }
 }
 
@@ -95,10 +87,12 @@ var apiName = 'ca-${workload}-api-${environment}'
 var envDomain = env.properties.defaultDomain
 var webUrl = empty(appBaseUrl) ? 'https://${webName}.${envDomain}' : appBaseUrl
 
-var keyVaultSecrets = [
-  { name: 'database-url', keyVaultUrl: '${vault.properties.vaultUri}secrets/database-admin-url', identity: identity.id }
-  { name: 'stripe-secret-key', keyVaultUrl: '${vault.properties.vaultUri}secrets/stripe-secret-key', identity: identity.id }
-  { name: 'stripe-webhook-secret', keyVaultUrl: '${vault.properties.vaultUri}secrets/stripe-webhook-secret', identity: identity.id }
+// Key Vault has public network access disabled by policy in some tenants, so Container Apps
+// cannot reference it; the values are passed in as secure parameters and kept as app secrets.
+var appSecrets = [
+  { name: 'database-url', value: databaseUrl }
+  { name: 'stripe-secret-key', value: empty(stripeSecretKey) ? 'not-set' : stripeSecretKey }
+  { name: 'stripe-webhook-secret', value: empty(stripeWebhookSecret) ? 'not-set' : stripeWebhookSecret }
 ]
 
 resource api 'Microsoft.App/containerApps@2024-03-01' = {
@@ -115,7 +109,7 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
       activeRevisionsMode: 'Single'
       ingress: { external: true, targetPort: apiPort, transport: 'auto' }
       registries: [{ server: registry.properties.loginServer, identity: identity.id }]
-      secrets: keyVaultSecrets
+      secrets: appSecrets
     }
     template: {
       containers: [
@@ -150,7 +144,7 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
       }
     }
   }
-  dependsOn: [pullRole, secretsRole]
+  dependsOn: [pullRole]
 }
 
 resource web 'Microsoft.App/containerApps@2024-03-01' = {

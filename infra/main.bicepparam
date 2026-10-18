@@ -19,9 +19,6 @@ param stripeWebhookSecret = readEnvironmentVariable('STRIPE_WEBHOOK_SECRET', '')
 param stripePriceMonthly = readEnvironmentVariable('STRIPE_PRICE_MONTHLY', '')
 param stripePriceAnnual = readEnvironmentVariable('STRIPE_PRICE_ANNUAL', '')
 
-param adminObjectId = readEnvironmentVariable('AUSOLD_ADMIN_OBJECT_ID', '')
-param deployerObjectId = readEnvironmentVariable('AUSOLD_DEPLOYER_OBJECT_ID', '')
-
 param entraTenantId = readEnvironmentVariable('ENTRA_TENANT_ID', '')
 param entraTenantSubdomain = readEnvironmentVariable('ENTRA_TENANT_SUBDOMAIN', '')
 param entraApiAudience = readEnvironmentVariable('ENTRA_API_AUDIENCE', '')

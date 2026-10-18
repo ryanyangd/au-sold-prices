@@ -5,9 +5,10 @@ import zipfile
 from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
 
-import ingest_core
 import pytest
-from ingest_core import BlockedError, IngestError, run_ingest
+
+from au_sold_prices.pipeline import ingest as ingest_core
+from au_sold_prices.pipeline.ingest import BlockedError, IngestError, run_ingest
 
 MODIFIED = datetime(2026, 9, 13, 19, 3, tzinfo=timezone.utc)
 NOW = MODIFIED + timedelta(days=1)
@@ -157,3 +158,29 @@ def test_missing_last_modified(server):
     server["HEAD"] = FakeResponse()
     with pytest.raises(IngestError):
         run_ingest("http://src", FakeLake(), NOW, no_sleep)
+
+
+def test_path_store_roundtrip(tmp_path):
+    from au_sold_prices.pipeline.ingest import PathStore
+
+    source = tmp_path / "src.bin"
+    source.write_bytes(b"abc")
+    store = PathStore(tmp_path / "volume")
+
+    assert not store.exists("nsw_psi/20260913/data.csv")
+    store.upload_file("nsw_psi/20260913/data.csv", source)
+    store.upload_text("nsw_psi/20260913/_manifest.json", "{}")
+
+    assert (tmp_path / "volume/nsw_psi/20260913/data.csv").read_bytes() == b"abc"
+    assert store.exists("nsw_psi/20260913/_manifest.json")
+
+
+def test_ingests_into_a_directory_store(server, tmp_path):
+    from au_sold_prices.pipeline.ingest import PathStore
+
+    server["GET"] = zip_bytes()
+    store = PathStore(tmp_path)
+
+    assert run_ingest("http://src", store, NOW, no_sleep)["status"] == "ingested"
+    assert run_ingest("http://src", store, NOW, no_sleep)["status"] == "skipped"
+    assert (tmp_path / FOLDER / "data.csv").exists()

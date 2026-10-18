@@ -9,7 +9,6 @@ on:
       - "src/**"
       - "apps/**"
       - "infra/**"
-      - "functions/**"
       - "pipelines/**"
       - "docker/**"
       - "scripts/ci/**"
