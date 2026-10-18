@@ -88,7 +88,7 @@ class Repository:
             timeout=timeout,
             max_lifetime=1800,
             check=ConnectionPool.check_connection,
-            kwargs={"row_factory": dict_row},
+            kwargs={"row_factory": dict_row, "connect_timeout": max(1, int(timeout))},
             open=True,
         )
         return cls(pool)
