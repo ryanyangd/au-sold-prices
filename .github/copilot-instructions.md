@@ -7,8 +7,7 @@ Next.js web app, Azure infrastructure in Bicep, deployed by GitHub Actions.
 - `src/au_sold_prices/` Python package: `pipeline/` (silver/gold SQL shared by DuckDB and Spark),
   `api/` (FastAPI), `nsw_*.py` (local file readers/downloader), `cli.py` (`ausold` command).
 - `apps/web/` Next.js (TypeScript, Tailwind). Only `lib/api.ts` talks to the network.
-- `functions/ingest/` Azure Function that copies the source archive into the lake.
-- `pipelines/databricks/` notebooks and the Databricks bundle.
+- `pipelines/databricks/` notebooks and the Databricks bundle (ingest, bronze, silver/gold, load).
 - `infra/` Bicep (`main.bicep`, `modules/`, `main.bicepparam`).
 - `scripts/` local dev and one-time setup scripts; `scripts/ci/` used by workflows.
 - `tests/` pytest suite using only synthetic data (`tests/sample_data.py`).

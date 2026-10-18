@@ -1,5 +1,5 @@
 # Databricks notebook source
-# Bronze: load the raw NSW sales CSV from the lake with Auto Loader.
+# Bronze: load the raw NSW sales CSV from the volume with Auto Loader.
 # Columns stay strings and rows are untouched; only names are made safe for Delta and
 # lineage columns are added. Typing, cleaning and dedupe happen in Silver.
 
@@ -9,16 +9,15 @@ import re
 
 from pyspark.sql import functions as F
 
-dbutils.widgets.text("lake_account", "")
-dbutils.widgets.text("catalog", "ausold")
-
-lake_account = dbutils.widgets.get("lake_account")
+dbutils.widgets.text("catalog", "")
 catalog = dbutils.widgets.get("catalog")
-source_path = f"abfss://raw@{lake_account}.dfs.core.windows.net/nsw_psi/*/data.csv"
-checkpoint = f"abfss://lakehouse@{lake_account}.dfs.core.windows.net/_checkpoints/bronze_nsw_psi_raw"
-target = f"{catalog}.bronze.nsw_psi_raw"
+assert catalog, "catalog widget is required"
 
-spark.sql(f"CREATE SCHEMA IF NOT EXISTS {catalog}.bronze")
+root = f"/Volumes/{catalog}/bronze/raw"
+source_path = f"{root}/nsw_psi/*/data.csv"
+checkpoint = f"{root}/_checkpoints/bronze_nsw_psi_raw"
+schema_location = f"{root}/_schemas/bronze_nsw_psi_raw"
+target = f"{catalog}.bronze.nsw_psi_raw"
 
 # COMMAND ----------
 
@@ -31,6 +30,7 @@ raw = (
     spark.readStream.format("cloudFiles")
     .option("cloudFiles.format", "csv")
     .option("cloudFiles.inferColumnTypes", "false")
+    .option("cloudFiles.schemaLocation", schema_location)
     .option("header", "true")
     .option("multiLine", "false")
     .load(source_path)

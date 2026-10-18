@@ -1,9 +1,12 @@
-"""Download the NSW sales archive into the lake's raw zone (no Azure imports).
+"""Download the NSW sales archive into a raw zone (no cloud SDK imports).
 
 Layout written per source version:
     nsw_psi/<YYYYMMDD>/archive.zip
     nsw_psi/<YYYYMMDD>/data.csv
     nsw_psi/<YYYYMMDD>/_manifest.json   (written last; its presence means "complete")
+
+On Databricks the raw zone is a Unity Catalog volume (a normal path under /Volumes/...), see
+`PathStore`.
 """
 
 import hashlib
@@ -45,6 +48,26 @@ class LakeStore(Protocol):
     def upload_file(self, path: str, local_path: Path) -> None: ...
 
     def upload_text(self, path: str, text: str) -> None: ...
+
+
+class PathStore:
+    """LakeStore backed by a directory, e.g. a Databricks volume mounted at /Volumes/..."""
+
+    def __init__(self, root: Path | str) -> None:
+        self._root = Path(root)
+
+    def exists(self, path: str) -> bool:
+        return (self._root / path).exists()
+
+    def upload_file(self, path: str, local_path: Path) -> None:
+        target = self._root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(local_path, target)
+
+    def upload_text(self, path: str, text: str) -> None:
+        target = self._root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
 
 
 def _open(url: str, method: str = "GET"):

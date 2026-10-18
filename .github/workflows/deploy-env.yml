@@ -98,7 +98,7 @@ jobs:
       - name: Read outputs
         id: out
         run: |
-          for key in resourceGroupName registryName apiName webName apiUrl webUrl ingestFunctionName; do
+          for key in resourceGroupName registryName apiName webName apiUrl webUrl; do
             echo "$key=$(jq -r ".$key.value" deployment-outputs.json)" >> "$GITHUB_OUTPUT"
           done
 
@@ -122,14 +122,6 @@ jobs:
           AUSOLD_WEB_IMAGE: ${{ steps.out.outputs.registryName }}.azurecr.io/ausold-web:${{ github.sha }}
         run: sh scripts/ci/bicep-deploy.sh create
 
-      - name: Publish the ingest function
-        uses: Azure/functions-action@v1
-        with:
-          app-name: ${{ steps.out.outputs.ingestFunctionName }}
-          package: functions/ingest
-          sku: flexconsumption
-          remote-build: true
-
       - name: Smoke test
         run: sh scripts/ci/smoke.sh "${{ steps.out.outputs.apiUrl }}" "${{ steps.out.outputs.webUrl }}"
 
@@ -148,5 +140,4 @@ jobs:
     uses: ./.github/workflows/data-refresh.yml
     with:
       environment: ${{ inputs.environment }}
-      run_ingest: true
     secrets: inherit

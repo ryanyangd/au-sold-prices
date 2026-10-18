@@ -3,8 +3,6 @@ param tags object
 param workload string
 param environment string
 param suffix string
-param keyVaultName string
-
 @description('Administrator login for the server (used by the data load; the API gets its own role).')
 param adminLogin string = 'ausoldadmin'
 
@@ -58,19 +56,7 @@ resource allowAzure 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@202
   dependsOn: [extensions]
 }
 
-resource vault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
-  name: keyVaultName
-}
-
 var host = server.properties.fullyQualifiedDomainName
-
-resource adminUrl 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
-  parent: vault
-  name: 'database-admin-url'
-  properties: {
-    value: 'postgresql://${adminLogin}:${uriComponent(adminPassword)}@${host}:5432/${databaseName}?sslmode=require'
-  }
-}
 
 output serverName string = server.name
 output host string = host

@@ -8,10 +8,12 @@ sync:
     - .
 
 variables:
-  lake_account:
-    description: Name of the ADLS Gen2 lake account (output `lakeStorageName` of infra/main.bicep)
   catalog:
-    default: ausold
+    description: >-
+      Unity Catalog catalog to use. Every new Azure Databricks workspace comes with one named
+      after the workspace (dbw-ausold-dev -> dbw_ausold_dev), backed by Databricks-managed storage.
+  alert_email:
+    description: Address notified when the job fails
   grant_select_to:
     description: Postgres role the API uses (read-only access to the serving schema)
     default: ""
@@ -21,14 +23,23 @@ resources:
     nsw_sales_pipeline:
       name: nsw-sales-pipeline-${bundle.target}
       schedule:
-        quartz_cron_expression: "0 0 7 * * ?"
+        quartz_cron_expression: "0 0 6 * * ?"
         timezone_id: Australia/Sydney
+      email_notifications:
+        on_failure:
+          - ${var.alert_email}
       tasks:
+        - task_key: ingest
+          notebook_task:
+            notebook_path: ./ingest_nsw_psi.py
+            base_parameters:
+              catalog: ${var.catalog}
         - task_key: bronze
+          depends_on:
+            - task_key: ingest
           notebook_task:
             notebook_path: ./bronze_nsw_psi_raw.py
             base_parameters:
-              lake_account: ${var.lake_account}
               catalog: ${var.catalog}
         - task_key: silver_gold
           depends_on:
@@ -47,7 +58,8 @@ resources:
               grant_select_to: ${var.grant_select_to}
 
 # The workspace host comes from DATABRICKS_HOST and credentials from the Azure CLI login
-# (DATABRICKS_AUTH_TYPE=azure-cli), so the same file serves both environments.
+# (DATABRICKS_AUTH_TYPE=azure-cli with DATABRICKS_AZURE_RESOURCE_ID), so one file serves both
+# environments. Tasks have no cluster, so they run on serverless compute.
 targets:
   dev:
     workspace:

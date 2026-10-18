@@ -33,7 +33,6 @@ au_sold_prices = ["pipeline/sql/*.sql"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["functions/ingest"]
 
 [tool.ruff.lint.per-file-ignores]
 "pipelines/databricks/*.py" = ["F821"]  # notebooks use injected spark/dbutils

@@ -1,5 +1,9 @@
-// Subscription-scope entry point. Deploys the ingestion + lakehouse foundation:
-// monitoring, ADLS Gen2 lake, Databricks workspace, ingest Function and a budget.
+// Subscription-scope entry point for one environment (dev or prod): Databricks workspace,
+// PostgreSQL, the API and web Container Apps, monitoring and a budget.
+//
+// The data pipeline runs entirely inside Databricks (ingest -> bronze -> silver -> gold -> Postgres)
+// on Databricks-managed storage, so there is no customer storage account. This keeps the design
+// working in subscriptions whose policy forces storage and Key Vault public access off.
 targetScope = 'subscription'
 
 @description('Environment name, used in resource names.')
@@ -14,7 +18,7 @@ param location string = 'australiaeast'
 @maxLength(8)
 param workload string = 'ausold'
 
-@description('Email that receives budget and failure alerts.')
+@description('Email that receives budget alerts.')
 param alertEmail string
 
 @description('Monthly budget in AUD for this workload (alerts only, does not stop spend).')
@@ -23,21 +27,12 @@ param monthlyBudgetAud int = 2000
 @description('First day of the budget period (budgets must start on the 1st of a month).')
 param budgetStartDate string = '2026-10-01'
 
-@description('Archive the ingest function downloads.')
-param sourceUrl string = 'https://nswpropertysalesdata.com/data/archive.zip'
-
-@description('CRON (UTC) for the daily ingest. Default is 18:00 UTC, about 05:00 in Sydney (before the 07:00 pipeline).')
-param ingestSchedule string = '0 0 18 * * *'
-
 @description('Extra tags applied to every resource.')
 param extraTags object = {}
 
-@description('Also deploy the web/API/database tier. Set false for ingestion + lakehouse only.')
-param deployApp bool = true
-
 @secure()
-@description('Postgres admin password (required when deployApp is true; 16+ chars).')
-param postgresAdminPassword string = ''
+@description('Postgres admin password (16+ characters, letters and digits only).')
+param postgresAdminPassword string
 
 @secure()
 param stripeSecretKey string = ''
@@ -47,9 +42,6 @@ param stripeWebhookSecret string = ''
 
 param stripePriceMonthly string = ''
 param stripePriceAnnual string = ''
-
-@description('Object ID of a user allowed to manage Key Vault secrets (optional).')
-param adminObjectId string = ''
 
 @description('Microsoft Entra External ID tenant used for customer sign-in (created separately).')
 param entraTenantId string = ''
@@ -61,9 +53,6 @@ param appBaseUrl string = ''
 
 param apiImage string = 'mcr.microsoft.com/k8se/quickstart:latest'
 param webImage string = 'mcr.microsoft.com/k8se/quickstart:latest'
-
-@description('Object ID of the CI/CD service principal (GitHub OIDC). Gets read access to secrets and the lake.')
-param deployerObjectId string = ''
 
 @description('Postgres compute. Dev: Burstable. Prod: GeneralPurpose.')
 param postgresSku string = environment == 'prod' ? 'Standard_D2ds_v5' : 'Standard_B2s'
@@ -101,19 +90,6 @@ module monitoring 'modules/monitoring.bicep' = {
     tags: tags
     workload: workload
     environment: environment
-    alertEmail: alertEmail
-  }
-}
-
-module storage 'modules/storage.bicep' = {
-  scope: rg
-  name: 'storage'
-  params: {
-    location: location
-    tags: tags
-    workload: workload
-    environment: environment
-    suffix: suffix
   }
 }
 
@@ -126,52 +102,10 @@ module databricks 'modules/databricks.bicep' = {
     workload: workload
     environment: environment
     managedResourceGroupName: databricksManagedRgName
-    lakeStorageName: storage.outputs.lakeStorageName
   }
 }
 
-module ingest 'modules/ingest.bicep' = {
-  scope: rg
-  name: 'ingest'
-  params: {
-    location: location
-    tags: tags
-    workload: workload
-    environment: environment
-    suffix: suffix
-    hostStorageName: storage.outputs.hostStorageName
-    lakeStorageName: storage.outputs.lakeStorageName
-    appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
-    sourceUrl: sourceUrl
-    ingestSchedule: ingestSchedule
-  }
-}
-
-module keyvault 'modules/keyvault.bicep' = if (deployApp) {
-  scope: rg
-  name: 'keyvault'
-  params: {
-    location: location
-    tags: tags
-    workload: workload
-    environment: environment
-    suffix: suffix
-    adminObjectId: adminObjectId
-    deployerObjectId: deployerObjectId
-  }
-}
-
-module access 'modules/access.bicep' = {
-  scope: rg
-  name: 'access'
-  params: {
-    lakeStorageName: storage.outputs.lakeStorageName
-    adminObjectId: adminObjectId
-    deployerObjectId: deployerObjectId
-  }
-}
-
-module postgres 'modules/postgres.bicep' = if (deployApp) {
+module postgres 'modules/postgres.bicep' = {
   scope: rg
   name: 'postgres'
   params: {
@@ -180,7 +114,6 @@ module postgres 'modules/postgres.bicep' = if (deployApp) {
     workload: workload
     environment: environment
     suffix: suffix
-    keyVaultName: keyvault!.outputs.name
     adminPassword: postgresAdminPassword
     skuName: postgresSku
     tier: postgresTier
@@ -189,17 +122,7 @@ module postgres 'modules/postgres.bicep' = if (deployApp) {
   }
 }
 
-module secrets 'modules/secrets.bicep' = if (deployApp) {
-  scope: rg
-  name: 'secrets'
-  params: {
-    keyVaultName: keyvault!.outputs.name
-    stripeSecretKey: stripeSecretKey
-    stripeWebhookSecret: stripeWebhookSecret
-  }
-}
-
-module apps 'modules/apps.bicep' = if (deployApp) {
+module apps 'modules/apps.bicep' = {
   scope: rg
   name: 'apps'
   params: {
@@ -208,7 +131,7 @@ module apps 'modules/apps.bicep' = if (deployApp) {
     workload: workload
     environment: environment
     suffix: suffix
-    databaseUrl: 'postgresql://ausoldadmin:${uriComponent(postgresAdminPassword)}@${postgres!.outputs.host}:5432/${postgres!.outputs.databaseName}?sslmode=require'
+    databaseUrl: 'postgresql://ausoldadmin:${uriComponent(postgresAdminPassword)}@${postgres.outputs.host}:5432/${postgres.outputs.databaseName}?sslmode=require'
     stripeSecretKey: stripeSecretKey
     stripeWebhookSecret: stripeWebhookSecret
     logAnalyticsId: monitoring.outputs.logAnalyticsId
@@ -223,7 +146,6 @@ module apps 'modules/apps.bicep' = if (deployApp) {
     stripePriceAnnual: stripePriceAnnual
     appBaseUrl: appBaseUrl
   }
-  dependsOn: [postgres, secrets]
 }
 
 module budget 'modules/budget.bicep' = {
@@ -238,16 +160,15 @@ module budget 'modules/budget.bicep' = {
 }
 
 output resourceGroupName string = rg.name
-output lakeStorageName string = storage.outputs.lakeStorageName
-output ingestFunctionName string = ingest.outputs.functionAppName
-output databricksWorkspaceUrl string = databricks.outputs.workspaceUrl
-output databricksAccessConnectorId string = databricks.outputs.accessConnectorId
 output databricksWorkspaceName string = databricks.outputs.workspaceName
+output databricksWorkspaceUrl string = databricks.outputs.workspaceUrl
+output databricksWorkspaceId string = databricks.outputs.workspaceId
+// Azure Databricks creates a catalog named after the workspace (dashes become underscores).
+output databricksCatalog string = databricks.outputs.catalogName
+output postgresHost string = postgres.outputs.host
+output registryName string = apps.outputs.registryName
+output apiName string = apps.outputs.apiName
+output apiUrl string = apps.outputs.apiUrl
+output webName string = apps.outputs.webName
+output webUrl string = apps.outputs.webUrl
 output authMode string = authMode
-output keyVaultName string = deployApp ? keyvault!.outputs.name : ''
-output postgresHost string = deployApp ? postgres!.outputs.host : ''
-output registryName string = deployApp ? apps!.outputs.registryName : ''
-output apiName string = deployApp ? apps!.outputs.apiName : ''
-output apiUrl string = deployApp ? apps!.outputs.apiUrl : ''
-output webName string = deployApp ? apps!.outputs.webName : ''
-output webUrl string = deployApp ? apps!.outputs.webUrl : ''
