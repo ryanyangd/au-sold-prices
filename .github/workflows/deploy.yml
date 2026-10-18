@@ -1,0 +1,86 @@
+name: Deploy
+
+# Merge to main  -> checks -> dev (automatic) -> prod (waits for your approval).
+# Run manually to deploy a single environment or to redeploy.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "apps/**"
+      - "infra/**"
+      - "functions/**"
+      - "pipelines/**"
+      - "docker/**"
+      - "scripts/ci/**"
+      - "pyproject.toml"
+      - ".github/workflows/deploy*.yml"
+      - ".github/workflows/data-refresh.yml"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Which environment(s) to deploy
+        type: choice
+        options: [dev, dev-then-prod, prod]
+        default: dev
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  dev:
+    needs: checks
+    if: github.event_name == 'push' || inputs.target != 'prod'
+    uses: ./.github/workflows/deploy-env.yml
+    with:
+      environment: dev
+    secrets: inherit
+
+  prod:
+    needs: [checks, dev]
+    # Runs after dev succeeds; the `prod-approval` environment holds it until you approve.
+    # Pushes only reach prod once the repository variable PROD_ENABLED is "true" (set it when
+    # Entra sign-in is configured); a manual "dev-then-prod" run does not need it.
+    if: >-
+      always() && needs.checks.result == 'success' && needs.dev.result == 'success' &&
+      ((github.event_name == 'push' && vars.PROD_ENABLED == 'true') || inputs.target == 'dev-then-prod')
+    uses: ./.github/workflows/deploy-env.yml
+    with:
+      environment: prod
+    secrets: inherit
+
+  prod-only:
+    needs: checks
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'prod'
+    uses: ./.github/workflows/deploy-env.yml
+    with:
+      environment: prod
+    secrets: inherit
+
+  report-failure:
+    needs: [checks, dev, prod, prod-only]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open a bug issue for the failed deployment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "Deployment failed: ${GITHUB_SHA::7}" \
+            --label bug --label deploy-failure \
+            --body "The deploy workflow failed for commit ${GITHUB_SHA}.
+
+          Run: ${RUN_URL}
+
+          Please read the failing job log, find the cause and propose a fix as a pull request. Do not change production data or secrets."

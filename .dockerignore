@@ -1,0 +1,15 @@
+.git
+.github
+.venv
+data
+docs-private
+node_modules
+apps
+infra
+pipelines
+functions
+tests
+**/__pycache__
+**/*.egg-info
+.pytest_cache
+.ruff_cache

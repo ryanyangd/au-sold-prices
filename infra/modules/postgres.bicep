@@ -1,0 +1,75 @@
+param location string
+param tags object
+param workload string
+param environment string
+param suffix string
+param keyVaultName string
+
+@description('Administrator login for the server (used by the data load; the API gets its own role).')
+param adminLogin string = 'ausoldadmin'
+
+@secure()
+param adminPassword string
+
+param databaseName string = 'ausold'
+param skuName string = 'Standard_B2s'
+param tier string = 'Burstable'
+param storageSizeGB int = 64
+param backupRetentionDays int = 7
+
+resource server 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
+  name: 'psql-${workload}-${environment}-${suffix}'
+  location: location
+  tags: tags
+  sku: {
+    name: skuName
+    tier: tier
+  }
+  properties: {
+    version: '16'
+    administratorLogin: adminLogin
+    administratorLoginPassword: adminPassword
+    storage: { storageSizeGB: storageSizeGB }
+    backup: { backupRetentionDays: backupRetentionDays, geoRedundantBackup: 'Disabled' }
+    highAvailability: { mode: 'Disabled' }
+    authConfig: { activeDirectoryAuth: 'Disabled', passwordAuth: 'Enabled' }
+  }
+}
+
+resource database 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2024-08-01' = {
+  parent: server
+  name: databaseName
+  properties: { charset: 'UTF8', collation: 'en_US.utf8' }
+}
+
+resource extensions 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2024-08-01' = {
+  parent: server
+  name: 'azure.extensions'
+  properties: { value: 'PG_TRGM', source: 'user-override' }
+}
+
+// v1: reachable from Azure services (Container Apps, Databricks) and TLS-only. Move to
+// private networking before real customer data or payments go live.
+resource allowAzure 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2024-08-01' = {
+  parent: server
+  name: 'AllowAzureServices'
+  properties: { startIpAddress: '0.0.0.0', endIpAddress: '0.0.0.0' }
+}
+
+resource vault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
+  name: keyVaultName
+}
+
+var host = server.properties.fullyQualifiedDomainName
+
+resource adminUrl 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: vault
+  name: 'database-admin-url'
+  properties: {
+    value: 'postgresql://${adminLogin}:${uriComponent(adminPassword)}@${host}:5432/${databaseName}?sslmode=require'
+  }
+}
+
+output serverName string = server.name
+output host string = host
+output databaseName string = databaseName
