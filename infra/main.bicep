@@ -208,7 +208,9 @@ module apps 'modules/apps.bicep' = if (deployApp) {
     workload: workload
     environment: environment
     suffix: suffix
-    keyVaultName: keyvault!.outputs.name
+    databaseUrl: 'postgresql://ausoldadmin:${uriComponent(postgresAdminPassword)}@${postgres!.outputs.host}:5432/${postgres!.outputs.databaseName}?sslmode=require'
+    stripeSecretKey: stripeSecretKey
+    stripeWebhookSecret: stripeWebhookSecret
     logAnalyticsId: monitoring.outputs.logAnalyticsId
     apiImage: apiImage
     webImage: webImage

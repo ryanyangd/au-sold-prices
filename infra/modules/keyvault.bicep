@@ -25,7 +25,7 @@ resource vault 'Microsoft.KeyVault/vaults@2023-07-01' = {
   }
 }
 
-var keyVaultSecretsUser = '4633458b-17de-4789-a0b3-9c8e8bf1a5a3'
+var keyVaultSecretsUser = '4633458b-17de-408a-b874-0445c86b69e6'
 var keyVaultAdministrator = '00482a5a-887f-4fb3-b363-3b7fe8e74483'
 
 resource deployerRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(deployerObjectId)) {

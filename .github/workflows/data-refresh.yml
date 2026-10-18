@@ -36,6 +36,7 @@ jobs:
     environment: ${{ inputs.environment }}
     env:
       ENVIRONMENT: ${{ inputs.environment }}
+      AUSOLD_PG_PASSWORD: ${{ secrets.PG_ADMIN_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: azure/login@v2

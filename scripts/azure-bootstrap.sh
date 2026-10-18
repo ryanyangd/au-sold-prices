@@ -49,16 +49,29 @@ if [ -z "$SP_OBJECT_ID" ]; then
 fi
 
 SUBJECT="repo:${REPO}:environment:${ENVIRONMENT}"
-EXISTING="$(az ad app federated-credential list --id "$APP_ID" --query "[?subject=='$SUBJECT'].name" -o tsv)"
-if [ -z "$EXISTING" ]; then
-  retry az ad app federated-credential create --id "$APP_ID" --parameters "{
-    \"name\": \"github-$ENVIRONMENT\",
-    \"issuer\": \"https://token.actions.githubusercontent.com\",
-    \"subject\": \"$SUBJECT\",
-    \"audiences\": [\"api://AzureADTokenExchange\"]
-  }" >/dev/null
-  echo "Trusted GitHub OIDC subject $SUBJECT"
+# GitHub may issue tokens whose subject uses immutable owner/repo IDs instead of names; trust both.
+SUBJECTS="$SUBJECT"
+if command -v gh >/dev/null 2>&1; then
+  OWNER_ID="$(gh api "repos/$REPO" --jq .owner.id 2>/dev/null || true)"
+  REPO_ID="$(gh api "repos/$REPO" --jq .id 2>/dev/null || true)"
+  if [ -n "$OWNER_ID" ] && [ -n "$REPO_ID" ]; then
+    SUBJECTS="$SUBJECT repo:${REPO%%/*}@${OWNER_ID}/${REPO#*/}@${REPO_ID}:environment:${ENVIRONMENT}"
+  fi
 fi
+INDEX=0
+for SUBJ in $SUBJECTS; do
+  INDEX=$((INDEX + 1))
+  EXISTING="$(az ad app federated-credential list --id "$APP_ID" --query "[?subject=='$SUBJ'].name" -o tsv)"
+  if [ -z "$EXISTING" ]; then
+    retry az ad app federated-credential create --id "$APP_ID" --parameters "{
+      \"name\": \"github-$ENVIRONMENT-$INDEX\",
+      \"issuer\": \"https://token.actions.githubusercontent.com\",
+      \"subject\": \"$SUBJ\",
+      \"audiences\": [\"api://AzureADTokenExchange\"]
+    }" >/dev/null
+    echo "Trusted GitHub OIDC subject $SUBJ"
+  fi
+done
 
 for ROLE in "Contributor" "User Access Administrator"; do
   HAS="$(az role assignment list --assignee "$SP_OBJECT_ID" --role "$ROLE" --scope "/subscriptions/$SUBSCRIPTION" --query 'length(@)' -o tsv 2>/dev/null || echo 0)"

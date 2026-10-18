@@ -46,6 +46,7 @@ resource extensions 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@20
   parent: server
   name: 'azure.extensions'
   properties: { value: 'PG_TRGM', source: 'user-override' }
+  dependsOn: [database] // the server rejects concurrent child-resource writes
 }
 
 // v1: reachable from Azure services (Container Apps, Databricks) and TLS-only. Move to
@@ -54,6 +55,7 @@ resource allowAzure 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@202
   parent: server
   name: 'AllowAzureServices'
   properties: { startIpAddress: '0.0.0.0', endIpAddress: '0.0.0.0' }
+  dependsOn: [extensions]
 }
 
 resource vault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {

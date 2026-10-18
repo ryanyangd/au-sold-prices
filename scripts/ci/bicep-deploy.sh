@@ -40,9 +40,17 @@ case "$MODE" in
       --query 'changes[].{change:changeType, resource:resourceId}' -o table
     ;;
   create)
-    az deployment sub create -n "ausold-${ENVIRONMENT}" -l "$LOCATION" \
+    # Role assignments can take a few minutes to propagate on a first deployment (Container Apps
+    # then cannot read Key Vault secrets yet), so retry once; the rerun is incremental.
+    attempt=1
+    until az deployment sub create -n "ausold-${ENVIRONMENT}" -l "$LOCATION" \
       -f infra/main.bicep -p infra/main.bicepparam \
-      --query properties.outputs -o json >"$OUTPUTS_FILE"
+      --query properties.outputs -o json >"$OUTPUTS_FILE"; do
+      if [ "$attempt" -ge 2 ]; then echo "Deployment failed after $attempt attempts" >&2; exit 1; fi
+      attempt=$((attempt + 1))
+      echo "Deployment failed; waiting 3 minutes for role assignments to propagate, then retrying..." >&2
+      sleep 180
+    done
     echo "Outputs written to $OUTPUTS_FILE"
     ;;
   *) echo "unknown mode: $MODE" >&2; exit 2 ;;
