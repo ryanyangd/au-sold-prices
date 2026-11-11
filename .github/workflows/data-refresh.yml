@@ -32,7 +32,7 @@ jobs:
       AUSOLD_PG_PASSWORD: ${{ secrets.PG_ADMIN_PASSWORD }}
       ALERT_EMAIL: ${{ vars.ALERT_EMAIL }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: azure/login@v2
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
